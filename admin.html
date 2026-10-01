@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="pt-MZ"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MAHALA — Admin</title><meta name="robots" content="noindex"><link rel="stylesheet" href="style.css">
+</head><body><div class="wrap">
+<div class="ah"><b style="font-size:1.2rem">MAHALA · Admin</b><button class="ghost" id="out" hidden>Sair</button></div>
+
+<form id="login" class="box" style="max-width:380px;margin:40px auto">
+  <h2 style="margin-top:0">Entrar</h2>
+  <label>Email<input id="em" type="email" autocomplete="username" required></label>
+  <label>Senha<input id="pw" type="password" autocomplete="current-password" required></label>
+  <div class="err" id="le"></div><button class="btn" style="width:100%">Entrar</button>
+</form>
+
+<div id="app" hidden>
+  <nav class="tabs"><button class="on" data-t="r">Rifas</button><button data-t="p">Participantes</button></nav>
+  <section id="t-r">
+    <form id="nf" class="box"><b>Nova rifa</b><div class="frm" style="margin-top:10px">
+      <label>Nome do prémio<input id="pn" required placeholder="Ex.: Mota Yamaha"></label>
+      <label>Foto do prémio<input id="img" type="file" accept="image/*"></label>
+      <label>Preço por bilhete (MT)<input id="pr" type="number" min="1" value="100" required></label>
+      <label>Início<input id="ini" type="datetime-local" required></label>
+      <label>Duração (dias)<input id="dur" type="number" min="1" value="90" required></label>
+    </div><button class="btn" id="nb">Criar rifa</button></form>
+    <div id="list"></div>
+  </section>
+  <section id="t-p" hidden>
+    <div class="frm"><label>Rifa<select id="fr"></select></label><label>Estado<select id="fe"><option value="">Todos</option><option value="pendente">Pendente</option><option value="pago">Pago</option><option value="reembolsado">Reembolsado</option></select></label></div>
+    <div id="pl"></div>
+  </section>
+</div></div>
+<dialog id="win"><div class="m" id="wt"></div><div class="m"><button class="ghost" onclick="document.getElementById('win').close()">Fechar</button></div></dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script>
+const C=window.CONFIG,$=s=>document.querySelector(s),sb=supabase.createClient(C.SUPABASE_URL,C.SUPABASE_ANON_KEY);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pw=p=>{p=String(p).replace(/\D/g,"");return p.length===9?"258"+p:p};
+const fd=d=>new Date(d).toLocaleString("pt-PT",{dateStyle:"short",timeStyle:"short"});
+const loc=d=>new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,16);
+const wl=(tel,txt)=>`https://wa.me/${pw(tel)}?text=${encodeURIComponent(txt)}`;
+let raffles=[],tickets=[];
+
+/* ===== MENSAGENS PRONTAS (WhatsApp) — edita o texto à vontade ===== */
+const MSG={
+  lembrar:t=>`Olá ${t.nome}! Recebemos o teu registo na rifa "${t.r}" (código ${t.codigo}), mas ainda não recebemos o comprovativo de pagamento. Podes enviá-lo aqui? Obrigado! — MAHALA`,
+  pago:t=>`Olá ${t.nome}! ✅ Pagamento confirmado. O teu bilhete da rifa "${t.r}" está activo.\nCódigo: ${t.codigo}\nBilhetes: ${t.qtd}\nBoa sorte! 🍀 — MAHALA`,
+  reembolso:t=>`Olá ${t.nome}! O reembolso do teu bilhete (${t.codigo}) da rifa "${t.r}" foi processado. Obrigado pela confiança. — MAHALA`,
+  vencedor:t=>`🎉 PARABÉNS ${t.nome}! Foste o vencedor da rifa "${t.r}" com o bilhete ${t.codigo}! Vamos combinar a entrega do teu prémio. — MAHALA`
+};
+
+async function init(){const {data}=await sb.auth.getSession();show(!!data.session)}
+function show(on){$("#login").hidden=on;$("#app").hidden=!on;$("#out").hidden=!on;if(on){$("#ini").value=loc(new Date());refresh()}}
+$("#login").onsubmit=async e=>{e.preventDefault();const {error}=await sb.auth.signInWithPassword({email:$("#em").value,password:$("#pw").value});error?$("#le").textContent="Email ou senha incorrectos.":show(true)};
+$("#out").onclick=async()=>{await sb.auth.signOut();show(false)};
+document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{document.querySelectorAll(".tabs button").forEach(x=>x.classList.toggle("on",x===b));$("#t-r").hidden=b.dataset.t!=="r";$("#t-p").hidden=b.dataset.t!=="p"});
+
+async function refresh(){
+  const [a,b]=await Promise.all([sb.from("raffles").select("*").order("created_at",{ascending:false}),sb.from("tickets").select("*").order("created_at",{ascending:false})]);
+  raffles=a.data||[];tickets=b.data||[];renderR();renderP();
+}
+const st=r=>{const n=new Date();return r.encerrada?"Terminada":new Date(r.inicio)>n?"Agendada":new Date(r.fim)<=n?"Tempo esgotado":"A decorrer"};
+
+function renderR(){
+  const fv=$("#fr").value;
+  $("#list").innerHTML=raffles.map(r=>{
+    const v=tickets.find(t=>t.id===r.vencedor_id),n=tickets.filter(t=>t.raffle_id===r.id&&t.estado==="pago").reduce((s,t)=>s+t.qtd,0);
+    return `<div class="box row"><div class="th">${r.imagem_url?`<img src="${esc(r.imagem_url)}" alt="">`:"🎁"}</div>
+    <div class="grow"><b>${esc(r.nome)}</b> · ${r.preco} ${C.MOEDA}<br><small>${st(r)} · ${fd(r.inicio)} → ${fd(r.fim)} · ${n} bilhetes pagos</small>${v?`<br><b class="ok">Vencedor: ${esc(v.nome)} (${esc(v.codigo)})</b>`:""}</div>
+    <div class="acts">${!r.encerrada?`<button class="sm" data-a="end" data-id="${r.id}">Terminar agora</button><button class="sm" data-a="dur" data-id="${r.id}">Mudar duração</button>`:""}${!r.vencedor_id?`<button class="sm gold" data-a="draw" data-id="${r.id}">Sortear</button>`:""}<button class="sm danger" data-a="del" data-id="${r.id}">Eliminar</button></div></div>`}).join("")||'<p class="muted">Ainda não há rifas.</p>';
+  $("#fr").innerHTML='<option value="">Todas as rifas</option>'+raffles.map(r=>`<option value="${r.id}">${esc(r.nome)}</option>`).join("");$("#fr").value=fv;
+}
+function renderP(){
+  const fr=$("#fr").value,fe=$("#fe").value;
+  $("#pl").innerHTML=tickets.filter(t=>(!fr||t.raffle_id===fr)&&(!fe||t.estado===fe)).map(t=>{
+    const r=raffles.find(x=>x.id===t.raffle_id),rn=r?r.nome:"",k=t.estado==="pago"?"pago":t.estado==="reembolsado"?"reembolso":"lembrar";
+    return `<div class="box row"><div class="grow"><b>${esc(t.nome)}</b> · ${esc(t.telefone)}<br><small>${esc(rn)} · ${esc(t.codigo)} · ${t.qtd} bilhete(s) · ${t.qtd*(r?r.preco:0)} ${C.MOEDA} · ${esc(t.metodo)} · ${fd(t.created_at)}</small></div><span class="tag ${t.estado}">${t.estado}</span>
+    <div class="acts">${t.estado!=="pago"?`<button class="sm gold" data-a="pago" data-id="${t.id}">Confirmar pago</button>`:""}${t.estado!=="reembolsado"?`<button class="sm" data-a="reemb" data-id="${t.id}">Reembolsar</button>`:""}<a class="sm" href="${wl(t.telefone,MSG[k]({...t,r:rn}))}" target="_blank" rel="noopener">WhatsApp</a></div></div>`}).join("")||'<p class="muted">Sem participantes.</p>';
+}
+$("#fr").onchange=$("#fe").onchange=renderP;
+
+document.addEventListener("click",async e=>{
+  const b=e.target.closest("[data-a]");if(!b)return;
+  const id=b.dataset.id,a=b.dataset.a,r=raffles.find(x=>x.id===id);
+  if(a==="end"){if(!confirm("Terminar esta rifa agora?"))return;await sb.from("raffles").update({encerrada:true,fim:new Date().toISOString()}).eq("id",id)}
+  else if(a==="dur"){const d=+prompt("Nova duração em dias (contados desde o início):",90);if(!d)return;await sb.from("raffles").update({fim:new Date(new Date(r.inicio).getTime()+d*864e5).toISOString()}).eq("id",id)}
+  else if(a==="del"){if(!confirm("Eliminar a rifa e todos os seus participantes?"))return;await sb.from("raffles").delete().eq("id",id)}
+  else if(a==="draw")return draw(r);
+  else if(a==="pago"||a==="reemb")await sb.from("tickets").update({estado:a==="pago"?"pago":"reembolsado"}).eq("id",id);
+  refresh();
+});
+
+async function draw(r){
+  const pool=tickets.filter(t=>t.raffle_id===r.id&&t.estado==="pago"),total=pool.reduce((s,t)=>s+t.qtd,0);
+  if(!total)return alert("Não há bilhetes pagos nesta rifa.");
+  if(!confirm(`Sortear entre ${total} bilhetes pagos? Isto termina a rifa.`))return;
+  let n=crypto.getRandomValues(new Uint32Array(1))[0]%total,w;
+  for(const t of pool){if(n<t.qtd){w=t;break}n-=t.qtd}
+  await sb.from("raffles").update({vencedor_id:w.id,encerrada:true}).eq("id",r.id);
+  $("#wt").innerHTML=`<h3>🎉 Vencedor</h3><p><b>${esc(w.nome)}</b><br>${esc(w.telefone)} · ${esc(w.codigo)}</p><a class="btn" href="${wl(w.telefone,MSG.vencedor({...w,r:r.nome}))}" target="_blank" rel="noopener">Avisar no WhatsApp</a>`;
+  $("#win").showModal();refresh();
+}
+
+$("#nf").onsubmit=async e=>{
+  e.preventDefault();const f=$("#img").files[0],bt=$("#nb");let url=null;bt.disabled=true;
+  if(f){const p=Date.now()+"-"+f.name.replace(/[^\w.]/g,"_"),up=await sb.storage.from("premios").upload(p,f);
+    if(up.error){bt.disabled=false;return alert("Falha ao enviar a imagem.")}
+    url=sb.storage.from("premios").getPublicUrl(p).data.publicUrl}
+  const ini=new Date($("#ini").value),dias=+$("#dur").value||90;
+  const {error}=await sb.from("raffles").insert({nome:$("#pn").value.trim(),imagem_url:url,preco:+$("#pr").value,inicio:ini.toISOString(),fim:new Date(ini.getTime()+dias*864e5).toISOString()});
+  bt.disabled=false;if(error)return alert("Erro ao criar a rifa.");
+  e.target.reset();$("#ini").value=loc(new Date());refresh();
+};
+init();
+</script></body></html>

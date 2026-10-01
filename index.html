@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="pt-MZ"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MAHALA — Rifas e Prémios</title><link rel="icon" href="logo.jpg"><link rel="stylesheet" href="style.css">
+</head><body>
+<header><img class="logo" src="logo.jpg" alt="MAHALA Rifas e Prémios"></header>
+<section class="hero"><div class="wrap">
+  <h1>Participa. Paga. Ganha.</h1><p id="tl">A carregar…</p>
+  <div class="timer" id="main"><div><b data-u="d">00</b><span>dias</span></div><div><b data-u="h">00</b><span>horas</span></div><div><b data-u="m">00</b><span>min</span></div><div><b data-u="s">00</b><span>seg</span></div></div>
+</div></section>
+<main class="wrap">
+  <h2>Rifas abertas</h2><div class="grid" id="grid"></div>
+  <h2>Reembolso a qualquer momento</h2>
+  <div class="box"><p class="muted" style="margin-top:0">Mudaste de ideias? Pede o reembolso pelo WhatsApp quando quiseres, antes do sorteio.</p><a class="btn" id="wa-ref" target="_blank" rel="noopener">Pedir reembolso no WhatsApp</a></div>
+</main>
+<footer>© <span id="yr"></span> MAHALA · Rifas e Prémios</footer>
+
+<dialog id="dlg"><div class="m">
+  <h3 id="dt"></h3>
+  <label>Nome completo<input id="nm" autocomplete="name"></label>
+  <label>Telemóvel / WhatsApp<input id="ph" inputmode="tel" autocomplete="tel" placeholder="84 000 0000"></label>
+  <label>Quantidade de bilhetes<input id="q" type="number" min="1" max="100" value="1"></label>
+  <div class="total"><span>Total</span><b id="tot"></b></div>
+  <label style="margin:0">Forma de pagamento</label><div class="pay" id="pm"></div>
+  <div class="det" id="det" hidden></div>
+  <div class="err" id="er" role="alert"></div>
+  <div class="okmsg" id="ok" hidden></div>
+  <button class="btn" id="go" type="button" hidden>Enviar comprovativo no WhatsApp</button>
+  <button class="ghost" id="x" type="button">Fechar</button>
+</div></dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script>
+const C=window.CONFIG,$=s=>document.querySelector(s),pad=n=>String(n).padStart(2,"0");
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const sb=supabase.createClient(C.SUPABASE_URL,C.SUPABASE_ANON_KEY);
+const wa=t=>`https://wa.me/${C.WHATSAPP}?text=${encodeURIComponent(t)}`;
+const parts=ms=>{ms=Math.max(0,ms);return{d:Math.floor(ms/864e5),h:Math.floor(ms/36e5%24),m:Math.floor(ms/6e4%60),s:Math.floor(ms/1e3%60)}};
+let R=[],cur=null,pm=null;
+$("#yr").textContent=new Date().getFullYear();
+$("#wa-ref").href=wa("Olá MAHALA! Quero pedir o reembolso do meu bilhete.\nNome: \nCódigo do bilhete: ");
+
+const card=r=>`<article class="raffle"><div class="pic">${r.imagem_url?`<img src="${esc(r.imagem_url)}" alt="${esc(r.nome)}" loading="lazy">`:"🎁"}</div><div class="body"><h3>${esc(r.nome)}</h3><div class="mini" data-id="${r.id}"></div><div class="price">${r.preco} ${C.MOEDA} <small>/ bilhete</small></div><button class="btn" data-buy="${r.id}">Participar</button></div></article>`;
+
+async function load(){
+  const {data,error}=await sb.from("raffles").select("*").eq("encerrada",false).order("fim");
+  if(error){$("#grid").innerHTML='<p class="muted">Não foi possível carregar as rifas. Tenta novamente.</p>';return}
+  R=(data||[]).filter(r=>new Date(r.fim)>new Date());
+  $("#grid").innerHTML=R.length?R.map(card).join(""):'<p class="muted">Novas rifas em breve. Volta daqui a pouco!</p>';
+  tick();
+}
+function tick(){
+  const now=new Date(),next=R.find(r=>new Date(r.inicio)<=now&&new Date(r.fim)>now);
+  const p=parts(next?new Date(next.fim)-now:0);
+  document.querySelectorAll("#main [data-u]").forEach(e=>e.textContent=pad(p[e.dataset.u]));
+  $("#tl").textContent=next?`Próximo sorteio: ${next.nome}`:"Novas rifas em breve";
+  document.querySelectorAll(".mini").forEach(e=>{
+    const r=R.find(x=>x.id===e.dataset.id);if(!r)return;
+    const s=new Date(r.inicio),up=s>now,q=parts((up?s:new Date(r.fim))-now);
+    e.textContent=`${up?"Abre em":"Termina em"} ${q.d}d ${pad(q.h)}h ${pad(q.m)}m ${pad(q.s)}s`;
+    e.parentNode.querySelector("[data-buy]").disabled=up;
+  });
+}
+load();setInterval(tick,1000);setInterval(load,60000);
+
+const err=m=>$("#er").textContent=m;
+const qty=()=>Math.max(1,Math.min(100,+$("#q").value||1));
+function render(){
+  $("#tot").textContent=qty()*cur.preco+" "+C.MOEDA;
+  const p=C.PAGAMENTOS.find(x=>x.id===pm);
+  document.querySelectorAll(".pmb").forEach(b=>b.classList.toggle("on",b.dataset.p===pm));
+  $("#det").hidden=$("#go").hidden=!p;
+  if(p)$("#det").innerHTML=`<p class="muted" style="margin:0 0 6px">Faz o pagamento de <b>${qty()*cur.preco} ${C.MOEDA}</b> para:</p>`+p.linhas.map(([k,v])=>`<div class="ln"><span>${k}</span><b>${esc(v)}</b><button type="button" class="cp" data-c="${esc(v)}">Copiar</button></div>`).join("")+`<div class="ln"><span>Nome</span><b>${esc(p.titular)}</b></div>`;
+}
+document.addEventListener("click",e=>{
+  const b=e.target.closest("[data-buy]");
+  if(b){cur=R.find(r=>r.id===b.dataset.buy);pm=null;$("#dt").textContent=cur.nome;$("#q").value=1;err("");$("#ok").hidden=true;
+    $("#pm").innerHTML=C.PAGAMENTOS.map(p=>`<button type="button" class="pmb" data-p="${p.id}">${esc(p.nome)}</button>`).join("");render();$("#dlg").showModal();return}
+  const p=e.target.closest(".pmb");if(p){pm=p.dataset.p;render();return}
+  const c=e.target.closest(".cp");if(c){navigator.clipboard?.writeText(c.dataset.c);c.textContent="Copiado ✓";setTimeout(()=>c.textContent="Copiar",1500)}
+});
+$("#q").oninput=()=>cur&&render();
+$("#x").onclick=()=>$("#dlg").close();
+
+$("#go").onclick=async()=>{
+  const nome=$("#nm").value.trim(),tel=$("#ph").value.replace(/\D/g,""),p=C.PAGAMENTOS.find(x=>x.id===pm),qtd=qty();
+  if(nome.length<3)return err("Escreve o teu nome completo.");
+  if(tel.length<9)return err("Escreve um número de telemóvel válido.");
+  err("");const w=window.open("","_blank");$("#go").disabled=true;
+  const codigo="MH-"+Math.random().toString(36).slice(2,7).toUpperCase();
+  const {error}=await sb.from("tickets").insert({raffle_id:cur.id,codigo,nome,telefone:tel,qtd,metodo:p.nome});
+  $("#go").disabled=false;
+  if(error){w&&w.close();return err("Não foi possível registar. Tenta novamente.")}
+  const url=wa(`Olá MAHALA! Envio o comprovativo de pagamento.\n\nRifa: ${cur.nome}\nCódigo: ${codigo}\nNome: ${nome}\nBilhetes: ${qtd}\nTotal: ${qtd*cur.preco} ${C.MOEDA}\nPago por: ${p.nome}\n\n(Segue o comprovativo em anexo)`);
+  w?w.location.href=url:location.href=url;
+  $("#ok").textContent=`Registo feito! O teu código é ${codigo}. Envia o comprovativo no WhatsApp para confirmarmos o teu bilhete.`;$("#ok").hidden=false;
+};
+</script>
+</body></html>
