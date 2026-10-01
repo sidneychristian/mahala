@@ -59,6 +59,7 @@ document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{document.que
 async function refresh(){
   const [a,b]=await Promise.all([sb.from("raffles").select("*").order("created_at",{ascending:false}),sb.from("tickets").select("*").order("created_at",{ascending:false})]);
   raffles=a.data||[];tickets=b.data||[];renderR();renderP();
+  if(a.error||b.error)$("#list").insertAdjacentHTML("afterbegin",`<div class="err">Erro ao ler a base de dados: ${esc((a.error||b.error).message)}</div>`);
 }
 const st=r=>{const n=new Date();return r.encerrada?"Terminada":new Date(r.inicio)>n?"Agendada":new Date(r.fim)<=n?"Tempo esgotado":"A decorrer"};
 
@@ -105,11 +106,11 @@ async function draw(r){
 $("#nf").onsubmit=async e=>{
   e.preventDefault();const f=$("#img").files[0],bt=$("#nb");let url=null;bt.disabled=true;
   if(f){const p=Date.now()+"-"+f.name.replace(/[^\w.]/g,"_"),up=await sb.storage.from("premios").upload(p,f);
-    if(up.error){bt.disabled=false;return alert("Falha ao enviar a imagem.")}
+    if(up.error){bt.disabled=false;return alert("Falha ao enviar a imagem: "+up.error.message)}
     url=sb.storage.from("premios").getPublicUrl(p).data.publicUrl}
   const ini=new Date($("#ini").value),dias=+$("#dur").value||90;
   const {error}=await sb.from("raffles").insert({nome:$("#pn").value.trim(),imagem_url:url,preco:+$("#pr").value,inicio:ini.toISOString(),fim:new Date(ini.getTime()+dias*864e5).toISOString()});
-  bt.disabled=false;if(error)return alert("Erro ao criar a rifa.");
+  bt.disabled=false;if(error)return alert("Erro ao criar a rifa: "+error.message);
   e.target.reset();$("#ini").value=loc(new Date());refresh();
 };
 init();
